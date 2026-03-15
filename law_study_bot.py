@@ -21,6 +21,7 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 from notion_client import Client as NotionClient
+from docx import Document
 from pptx import Presentation
 
 # ---------------------------------------------------------------------------
@@ -121,7 +122,8 @@ def list_new_files(drive_service, folder_id: str, processed: set[str]) -> list[d
     query = (
         f"'{folder_id}' in parents "
         "and (mimeType='application/vnd.openxmlformats-officedocument.presentationml.presentation' "
-        "or mimeType='application/pdf') "
+        "or mimeType='application/pdf' "
+        "or mimeType='application/vnd.openxmlformats-officedocument.wordprocessingml.document') "
         "and trashed=false"
     )
     results = (
@@ -172,6 +174,17 @@ def extract_text_pptx(data: bytes) -> str:
     return "\n".join(parts)
 
 
+def extract_text_docx(data: bytes) -> str:
+    """Extract text from a Word document, preserving heading/paragraph structure."""
+    doc = Document(io.BytesIO(data))
+    lines: list[str] = []
+    for para in doc.paragraphs:
+        text = para.text.strip()
+        if text:
+            lines.append(text)
+    return "\n".join(lines)
+
+
 def extract_text_pdf(data: bytes) -> str:
     """Extract text from a PDF using PyMuPDF."""
     doc = fitz.open(stream=data, filetype="pdf")
@@ -190,6 +203,8 @@ def extract_text(filename: str, data: bytes) -> str:
         return extract_text_pptx(data)
     elif ext == ".pdf":
         return extract_text_pdf(data)
+    elif ext == ".docx":
+        return extract_text_docx(data)
     raise ValueError(f"Unsupported file type: {ext}")
 
 
