@@ -69,7 +69,10 @@ SYSTEM_PROMPT = (
     "3. Case citations must be copied exactly as they appear in the lecture. If a citation is not given in the lecture, omit the citation field rather than guessing.\n"
     "4. If a field (e.g. cases, legislation) has no content in the lecture, return an empty array — never fabricate entries to fill it.\n"
     "5. Summaries, key concepts, exam notes, and tutorial prep must be grounded in the lecture content only — do not add external legal commentary.\n"
-    "Write tutorial_prep in plain conversational English — short spoken phrases, not formal legal prose. "
+    "Write tutorial_prep as an array of short spoken phrases in plain conversational English — not formal legal prose. "
+    "Write exam_notes as an array of concise bullet points, one distinct point per item. "
+    "For definitions, extract only terms that are explicitly defined in the lecture; include the exact or paraphrased definition as stated. "
+    "For potential_exam_questions, generate 3-5 realistic problem or essay questions a lecturer would set based strictly on the topics covered — frame them as a student would see them in an exam. "
     "Format any citations that ARE present in the lecture in AGLC4 format."
 )
 
@@ -78,6 +81,9 @@ NOTE_SCHEMA = """{
   "topic": "Native Title",
   "summary": "3-4 sentence overview of the lecture",
   "key_concepts": ["concept 1", "concept 2"],
+  "definitions": [
+    {"term": "Native Title", "definition": "the rights and interests of Aboriginal peoples in land under their traditional laws and customs"}
+  ],
   "cases": [
     {
       "name": "Mabo v Queensland (No 2)",
@@ -87,8 +93,9 @@ NOTE_SCHEMA = """{
     }
   ],
   "legislation": ["s 223 Native Title Act 1993 (Cth)"],
-  "exam_notes": "key points likely to appear in exams",
-  "tutorial_prep": "conversational dot points for tutorial discussion — plain English, not formal legal prose"
+  "exam_notes": ["key point likely to appear in exams", "another key point"],
+  "potential_exam_questions": ["Problem question or essay question likely to appear?", "Another likely question?"],
+  "tutorial_prep": ["plain English spoken point for tutorial discussion", "another conversational point"]
 }"""
 
 # ---------------------------------------------------------------------------
@@ -186,7 +193,16 @@ def extract_text_docx(data: bytes) -> str:
     lines: list[str] = []
     for para in doc.paragraphs:
         text = para.text.strip()
-        if text:
+        if not text:
+            continue
+        style = para.style.name if para.style else ""
+        if style.startswith("Heading 1"):
+            lines.append(f"# {text}")
+        elif style.startswith("Heading 2"):
+            lines.append(f"## {text}")
+        elif style.startswith("Heading 3"):
+            lines.append(f"### {text}")
+        else:
             lines.append(text)
     return "\n".join(lines)
 
@@ -234,7 +250,7 @@ def process_with_claude(
     log.info("  Calling Claude API…")
     with claude_client.messages.stream(
         model=CLAUDE_MODEL,
-        max_tokens=4096,
+        max_tokens=8192,
         thinking={"type": "adaptive"},
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": user_message}],
@@ -338,12 +354,47 @@ def write_subject_page(
         heading2("Key Concepts"),
     ]
     blocks += bullet_items(notes.get("key_concepts", []))
+
+    # Definitions
+    definitions = notes.get("definitions", [])
+    if definitions:
+        blocks.append(heading2("Definitions"))
+        blocks += bullet_items(
+            [f"{d.get('term', '')}: {d.get('definition', '')}" for d in definitions]
+        )
+
+    # Cases inline summary (full detail lives in Case Bank)
+    cases = notes.get("cases", [])
+    if cases:
+        blocks.append(heading2("Cases"))
+        blocks += bullet_items(
+            [f"{c.get('name', '')} — {c.get('principle', '')}" for c in cases]
+        )
+
     blocks.append(heading2("Legislation"))
     blocks += bullet_items(notes.get("legislation", []))
+
+    # exam_notes: may be a list (new) or legacy string
     blocks.append(heading2("Exam Notes"))
-    blocks.append(paragraph(notes.get("exam_notes", "")))
+    exam_notes = notes.get("exam_notes", [])
+    if isinstance(exam_notes, list):
+        blocks += bullet_items(exam_notes)
+    else:
+        blocks.append(paragraph(exam_notes))
+
+    # Potential exam questions
+    exam_qs = notes.get("potential_exam_questions", [])
+    if exam_qs:
+        blocks.append(heading2("Potential Exam Questions"))
+        blocks += bullet_items(exam_qs)
+
+    # tutorial_prep: may be a list (new) or legacy string
     blocks.append(heading2("Tutorial Prep"))
-    blocks.append(paragraph(notes.get("tutorial_prep", "")))
+    tutorial_prep = notes.get("tutorial_prep", [])
+    if isinstance(tutorial_prep, list):
+        blocks += bullet_items(tutorial_prep)
+    else:
+        blocks.append(paragraph(tutorial_prep))
 
     append_blocks_chunked(notion, page_id, blocks)
 
@@ -413,14 +464,26 @@ def write_revision_page(
             "Name": {"title": rich_text(title)},
         },
     )
-    append_blocks_chunked(
-        notion,
-        page["id"],
-        [
-            heading2("Exam Notes"),
-            paragraph(notes.get("exam_notes", "")),
-        ],
-    )
+    blocks: list[dict] = [heading2("Exam Notes")]
+    exam_notes = notes.get("exam_notes", [])
+    if isinstance(exam_notes, list):
+        blocks += bullet_items(exam_notes)
+    else:
+        blocks.append(paragraph(exam_notes))
+
+    exam_qs = notes.get("potential_exam_questions", [])
+    if exam_qs:
+        blocks.append(heading2("Potential Exam Questions"))
+        blocks += bullet_items(exam_qs)
+
+    definitions = notes.get("definitions", [])
+    if definitions:
+        blocks.append(heading2("Key Definitions"))
+        blocks += bullet_items(
+            [f"{d.get('term', '')}: {d.get('definition', '')}" for d in definitions]
+        )
+
+    append_blocks_chunked(notion, page["id"], blocks)
 
 
 # ---------------------------------------------------------------------------
