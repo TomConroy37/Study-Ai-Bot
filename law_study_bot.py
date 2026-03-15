@@ -62,9 +62,15 @@ SUBJECT_CONFIG = {
 CLAUDE_MODEL = "claude-opus-4-6"  # Most capable model; user can override via env
 
 SYSTEM_PROMPT = (
-    "You are a law school study assistant. Extract structured notes from this lecture. "
+    "You are a law school study assistant. Extract structured notes strictly from the lecture content provided. "
+    "STRICT ACCURACY RULES — these are non-negotiable:\n"
+    "1. Only include cases that are explicitly named in the lecture text. Do not add, infer, or recall cases from your training data.\n"
+    "2. Only include legislation that is explicitly referenced in the lecture text. Do not add related or commonly associated statutes.\n"
+    "3. Case citations must be copied exactly as they appear in the lecture. If a citation is not given in the lecture, omit the citation field rather than guessing.\n"
+    "4. If a field (e.g. cases, legislation) has no content in the lecture, return an empty array — never fabricate entries to fill it.\n"
+    "5. Summaries, key concepts, exam notes, and tutorial prep must be grounded in the lecture content only — do not add external legal commentary.\n"
     "Write tutorial_prep in plain conversational English — short spoken phrases, not formal legal prose. "
-    "Always include full case citations in AGLC4 format."
+    "Format any citations that ARE present in the lecture in AGLC4 format."
 )
 
 NOTE_SCHEMA = """{
@@ -220,8 +226,9 @@ def process_with_claude(
     user_message = (
         f"Subject: {subject_label}\n"
         f"File: {filename}\n\n"
-        f"Lecture content:\n{text}\n\n"
-        f"Return ONLY a valid JSON object matching this schema (no markdown fences):\n{NOTE_SCHEMA}"
+        f"Lecture content (your ONLY source — do not use knowledge outside this text):\n{text}\n\n"
+        f"Return ONLY a valid JSON object matching this schema (no markdown fences).\n"
+        f"Include only cases and legislation that appear explicitly in the lecture content above:\n{NOTE_SCHEMA}"
     )
 
     log.info("  Calling Claude API…")
